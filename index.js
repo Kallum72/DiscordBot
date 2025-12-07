@@ -73,21 +73,21 @@ app.post("/send", async (req, res) => {
 app.get("/auth/discord", (req, res) => {
     const playerId = req.query.playerId;
 
-    if (!playerId) return res.status(400).send("Missing playerId");
+    if (!playerId)
+        return res.status(400).send("Missing playerId");
 
     const redirectUri = `${process.env.DISCORD_REDIRECT_URI}?playerId=${playerId}`;
 
-    const redirect = 
+    const redirect =
         "https://discord.com/oauth2/authorize" +
         `?client_id=${process.env.DISCORD_CLIENT_ID}` +
         `&redirect_uri=${encodeURIComponent(redirectUri)}` +
         `&response_type=code` +
         `&scope=identify`;
 
-    console.log("Redirecting to Discord OAuth for player:", playerId);
-
     res.redirect(redirect);
 });
+
 
 
 // STEP 2 — Discord redirects here with ?code= & ?playerId=
