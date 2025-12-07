@@ -72,37 +72,35 @@ app.post("/send", async (req, res) => {
 // https://yourserver/auth/discord?playerId=PLAYER123
 app.get("/auth/discord", (req, res) => {
     const playerId = req.query.playerId;
-    if (!playerId)
-        return res.status(400).send("Missing playerId");
+    if (!playerId) return res.status(400).send("Missing playerId");
 
-    const redirectUriBase = process.env.DISCORD_REDIRECT_URI;
-    const redirectUri = `${redirectUriBase}?playerId=${encodeURIComponent(playerId)}`;
+    const baseRedirect = process.env.DISCORD_REDIRECT_URI;
 
     const authUrl =
         `https://discord.com/oauth2/authorize` +
         `?client_id=${process.env.DISCORD_CLIENT_ID}` +
-        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+        `&redirect_uri=${encodeURIComponent(baseRedirect)}` +
         `&response_type=code` +
-        `&scope=identify`;
+        `&scope=identify` +
+        `&state=${encodeURIComponent(playerId)}`; // PUT playerId in state
 
-    console.log("OAuth request redirect:", authUrl);
+    console.log("Redirecting to:", authUrl);
     res.redirect(authUrl);
 });
+
 
 
 
 // STEP 2 — Discord redirects here with ?code= & ?playerId=
 app.get("/auth/discord/callback", async (req, res) => {
     const code = req.query.code;
-    const playerId = req.query.playerId;
+    const playerId = req.query.state; // RESTORE playerId from state!
 
     if (!code || !playerId)
         return res.status(400).send("Missing code or playerId");
 
-    const redirectUriBase = process.env.DISCORD_REDIRECT_URI;
-    const redirectUri = `${redirectUriBase}?playerId=${encodeURIComponent(playerId)}`;
-
     try {
+        // Exchange code for token using ONLY the registered redirect URI
         const tokenResponse = await axios.post(
             "https://discord.com/api/oauth2/token",
             new URLSearchParams({
@@ -110,7 +108,7 @@ app.get("/auth/discord/callback", async (req, res) => {
                 client_secret: process.env.DISCORD_CLIENT_SECRET,
                 grant_type: "authorization_code",
                 code,
-                redirect_uri: redirectUri
+                redirect_uri: process.env.DISCORD_REDIRECT_URI
             }),
             { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
         );
@@ -135,7 +133,7 @@ app.get("/auth/discord/callback", async (req, res) => {
         console.log(`Linked Unity Player ${playerId} -> Discord ${discordUser.id}`);
 
     } catch (err) {
-        console.error("OAuth ERROR:", err.response?.data || err);
+        console.error(err.response?.data || err);
         res.status(500).send("OAuth2 Authentication Failed.");
     }
 });
