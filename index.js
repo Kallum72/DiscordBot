@@ -9,6 +9,9 @@ const axios = require("axios");
 const app = express();
 app.use(express.json()); // allow JSON input (Unity uses this)
 
+// In-memory database for linked accounts
+let linkedAccounts = {};  // { playerId: discordId }
+
 
 // -------------------------------------
 // DISCORD BOT SETUP
@@ -62,28 +65,42 @@ app.post("/send", async (req, res) => {
 
 
 // ======================================================
-// OAUTH2 LOGIN SYSTEM (STEP 3 INTEGRATED)
+// OAUTH2 LOGIN SYSTEM (FULLY FIXED + PLAYER ID SUPPORT)
 // ======================================================
 
-// STEP 1 — Redirect user to Discord login
+// STEP 1 — Unity calls this:
+// https://yourserver/auth/discord?playerId=PLAYER123
 app.get("/auth/discord", (req, res) => {
+    const playerId = req.query.playerId;
+
+    if (!playerId) return res.status(400).send("Missing playerId");
+
+    const redirectUri = `${process.env.DISCORD_REDIRECT_URI}?playerId=${playerId}`;
+
     const redirect = 
         "https://discord.com/oauth2/authorize" +
         `?client_id=${process.env.DISCORD_CLIENT_ID}` +
-        `&redirect_uri=${encodeURIComponent(process.env.DISCORD_REDIRECT_URI)}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}` +
         `&response_type=code` +
         `&scope=identify`;
+
+    console.log("Redirecting to Discord OAuth for player:", playerId);
 
     res.redirect(redirect);
 });
 
 
-// STEP 2 — Discord redirects user here with ?code=
+// STEP 2 — Discord redirects here with ?code= & ?playerId=
 app.get("/auth/discord/callback", async (req, res) => {
     const code = req.query.code;
-    if (!code) return res.status(400).send("Missing OAuth2 code.");
+    const playerId = req.query.playerId;
+
+    if (!code || !playerId)
+        return res.status(400).send("Missing OAuth2 code or playerId");
 
     try {
+        const redirectUri = `${process.env.DISCORD_REDIRECT_URI}?playerId=${playerId}`;
+
         // Exchange code for access token
         const tokenResponse = await axios.post(
             "https://discord.com/api/oauth2/token",
@@ -92,7 +109,7 @@ app.get("/auth/discord/callback", async (req, res) => {
                 client_secret: process.env.DISCORD_CLIENT_SECRET,
                 grant_type: "authorization_code",
                 code,
-                redirect_uri: process.env.DISCORD_REDIRECT_URI
+                redirect_uri: redirectUri
             }),
             { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
         );
@@ -107,10 +124,10 @@ app.get("/auth/discord/callback", async (req, res) => {
 
         const discordUser = userResponse.data;
 
-        console.log("OAuth2 login:", discordUser);
+        // Save the link
+        linkedAccounts[playerId] = discordUser.id;
 
-        // You will want to store this mapping permanently.
-        // Save: yourGamePlayerId -> discordUser.id
+        console.log(`Linked Unity Player ${playerId} <-> Discord ID ${discordUser.id}`);
 
         res.send(`
             <h1>Discord Linked Successfully!</h1>
@@ -122,6 +139,22 @@ app.get("/auth/discord/callback", async (req, res) => {
         console.error(err.response?.data || err);
         res.status(500).send("OAuth2 Authentication Failed.");
     }
+});
+
+
+// ======================================================
+// STEP 6 — UNITY CHECKS IF PLAYER IS LINKED
+// ======================================================
+app.get("/linked/:playerId", (req, res) => {
+    const playerId = req.params.playerId;
+
+    const discordId = linkedAccounts[playerId];
+
+    res.json({
+        playerId,
+        discordId: discordId || null,
+        linked: !!discordId
+    });
 });
 
 
